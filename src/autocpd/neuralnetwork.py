@@ -51,6 +51,80 @@ def general_simple_nn(n, l, m, num_classes, model_name="simple_nn"):
     return model
 
 
+def general_transformer_nn(
+    n, 
+    d_model=64, 
+    num_heads=4, 
+    ff_dim=128, 
+    num_layers=1,
+    num_classes=2, 
+    dropout_rate=0.1,
+    model_name="transformer_nn"
+):
+    """
+    To construct a transformer neural network for time series classification.
+
+    Parameters
+    ----------
+    n : int
+        the input sequence length (time series length)
+    d_model : int, optional
+        the dimension of the model, by default 64
+    num_heads : int, optional
+        the number of attention heads, by default 4
+    ff_dim : int, optional
+        the dimension of the feed-forward network, by default 128
+    num_layers : int, optional
+        the number of transformer layers, by default 1
+    num_classes : int
+        the number of output classes
+    dropout_rate : float, optional
+        the dropout rate, by default 0.1
+    model_name : str, optional
+        the model name, by default "transformer_nn"
+
+    Returns
+    -------
+    model
+        the transformer neural network
+    """
+    inputs = tf.keras.Input(shape=(n,), name="Input")
+    
+    # Reshape and embed input
+    x = layers.Reshape((n, 1))(inputs)
+    x = layers.Dense(d_model)(x)
+    
+    # Add positional encoding
+    pos_emb = layers.Embedding(input_dim=n, output_dim=d_model)
+    positions = tf.range(start=0, limit=n, delta=1)
+    x += pos_emb(positions)
+    
+    # Transformer layers
+    for _ in range(num_layers):
+        # Multi-head attention
+        attn_output = layers.MultiHeadAttention(
+            num_heads=num_heads, 
+            key_dim=d_model,
+            dropout=dropout_rate
+        )(x, x)
+        x = layers.Add()([x, attn_output])
+        x = layers.LayerNormalization()(x)
+        
+        # Feed forward network
+        ffn = layers.Dense(ff_dim, activation="relu")(x)
+        ffn = layers.Dropout(dropout_rate)(ffn)
+        ffn = layers.Dense(d_model)(ffn)
+        x = layers.Add()([x, ffn])
+        x = layers.LayerNormalization()(x)
+    
+    # Global pooling and classification
+    x = layers.GlobalAveragePooling1D()(x)
+    x = layers.Dropout(dropout_rate)(x)
+    outputs = layers.Dense(num_classes)(x)
+    
+    return models.Model(inputs=inputs, outputs=outputs, name=model_name)
+
+
 # mymodel = simple_nn(n=100, l=1, m=10, num_classes=2)
 # mymodel = simple_nn(n=100, l=3, m=10, num_classes=2)
 # mymodel = simple_nn(n=100, l=3, m=[20, 20, 5], num_classes=2)

@@ -367,3 +367,6 @@ project-words.txt
 dist/
 test/tensorboard_logs/
 !test/figs/*.png
+
+
+batch_experiment_results/
