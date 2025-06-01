@@ -218,7 +218,7 @@ def _generate_mean_change_data(N_sub: int, n: int, d: int, mean_changes: Dict,
             
             ts2 = np.random.multivariate_normal(mean2, cov_matrix, n - change_point).T
             ts = np.concatenate([ts1, ts2], axis=-1)
-        
+            
         data.append(ts)
     
     return np.array(data)
@@ -269,7 +269,7 @@ def _generate_variance_change_data(N_sub: int, n: int, d: int, var_changes: Dict
             
             ts2 = np.random.multivariate_normal(np.zeros(d), cov_matrix2, n - change_point).T
             ts = np.concatenate([ts1, ts2], axis=-1)
-        
+            
         data.append(ts)
     
     return np.array(data)
@@ -301,7 +301,7 @@ def _generate_correlation_change_data(N_sub: int, n: int, d: int, corr_changes: 
         ts2 = np.random.multivariate_normal(np.zeros(d), cov_matrix2, n - change_point).T
         
         ts = np.concatenate([ts1, ts2], axis=-1)
-        
+            
         data.append(ts)
     
     return np.array(data)
@@ -351,7 +351,7 @@ def _generate_trend_change_data(N_sub: int, n: int, d: int, trend_changes: Dict,
                     ts2_base[dim] += trend
             
             ts = np.concatenate([ts1, ts2_base], axis=-1)
-        
+            
         data.append(ts)
     
     return np.array(data)
@@ -398,7 +398,7 @@ def _generate_structural_change_data(N_sub: int, n: int, d: int, struct_changes:
             ts2 = _generate_no_change_data(1, n - change_point, d, noise_std * (1 + magnitude), correlation_base)[0]
         
         ts = np.concatenate([ts1, ts2], axis=-1)
-        
+            
         data.append(ts)
     
     return np.array(data)

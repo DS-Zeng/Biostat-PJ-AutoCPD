@@ -344,11 +344,23 @@ def run_experiment(classes, dim, samples_per_class=800, length=400, epochs=80, b
     )
     
     # 评估模型
-    test_loss, test_accuracy = model.evaluate(x_test, y_test, verbose=0)
+    eval_results = model.evaluate(x_test, y_test, verbose=0)
+    if isinstance(eval_results, list):
+        test_loss = eval_results[0]
+        test_accuracy = eval_results[1] if len(eval_results) > 1 else None
+    else:
+        test_loss = eval_results
+        test_accuracy = None
+    
     y_pred = np.argmax(model.predict(x_test, verbose=0), axis=1)
     
     print(f"\n测试结果:")
-    print(f"测试准确率: {test_accuracy:.4f}")
+    if test_accuracy is not None:
+        print(f"测试准确率: {test_accuracy:.4f}")
+    else:
+        # 计算准确率从预测结果
+        test_accuracy = np.mean(y_pred == y_test)
+        print(f"测试准确率: {test_accuracy:.4f} (手动计算)")
     print(f"测试损失: {test_loss:.4f}")
     
     # 生成混淆矩阵

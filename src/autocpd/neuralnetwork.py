@@ -3,7 +3,7 @@ from pathlib import Path
 
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras import layers, losses, metrics, models
+from keras import layers, losses, metrics, models
 
 
 def general_simple_nn(n, l, m, num_classes, model_name="simple_nn"):
