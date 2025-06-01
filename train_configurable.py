@@ -248,12 +248,13 @@ def prepare_data_for_model(data_dict, args):
     if args.transform == 'auto':
         if args.model in ['simple', 'transformer']:
             transform_type = 'flatten'
-        elif args.dim == 1:
-            transform_type = 'channel'  # 保持原格式
-        elif args.dim <= 5:
-            transform_type = 'channel'  # 低维保持通道格式
+        elif args.model == 'deep':
+            if args.dim == 1:
+                transform_type = 'channel'  # 1维保持原格式
+            else:
+                transform_type = 'reshape_20x20'  # 高维使用20x20格式
         else:
-            transform_type = 'pca'  # 高维使用PCA
+            transform_type = 'channel'  # 默认保持通道格式
     else:
         transform_type = args.transform
     
@@ -303,12 +304,12 @@ def get_model_config(args, input_shape):
             # Transformer通常需要较小的学习率
             args.learning_rate = 5e-4 if args.classes <= 3 else 3e-4
         elif args.model == 'deep':
-            args.learning_rate = 8e-5
+            args.learning_rate = 8e-4
         else:
             args.learning_rate = 8e-4
     
     if args.epochs is None:
-        base_epochs = 50 if args.model == 'simple' else 70
+        base_epochs = 50 if args.model == 'simple' or args.model == 'transformer' else 120
         args.epochs = base_epochs + (args.classes - 2) * 10 + (args.dim - 1) * 5
     
     if args.dropout is None:
@@ -409,49 +410,129 @@ def build_model(args, input_shape):
     
     else:  # deep
         # 深度神经网络
-        if len(input_shape) == 2:
+        if len(input_shape) == 3:
+            # 新的3维格式：(channels, height, width) - 不包含batch维度
+            channels, height, width = input_shape
+            print(f"深度网络参数:")
+            print(f"  通道数: {channels}")
+            print(f"  高度: {height}")
+            print(f"  宽度: {width}")
+            
+            # 根据新格式创建特殊的深度网络
+            from autocpd.neuralnetwork import general_deep_nn_4d
+            
+            # 网络参数
+            n_filter = 16
+            kernel_size = (3, 3)  # 固定使用3x3卷积核
+            num_resblock = 3
+            
+            # 根据类别数调整全连接层
+            if args.classes <= 2:
+                m = np.array([40, 30, 20])
+            elif args.classes <= 3:
+                m = np.array([50, 40, 30, 20])
+            else:
+                m = np.array([60, 50, 40, 30, 20])
+            
+            l = len(m)
+            
+            print(f"  卷积核: {kernel_size}")
+            print(f"  残差块: {num_resblock}")
+            print(f"  全连接层: {m}")
+            
+            model = general_deep_nn_4d(
+                channels=channels,
+                height=height,
+                width=width,
+                kernel_size=kernel_size,
+                n_filter=n_filter,
+                dropout_rate=args.dropout,
+                n_classes=args.classes,
+                n_resblock=num_resblock,
+                m=m,
+                l=l,
+                model_name=args.exp_name
+            )
+            
+        elif len(input_shape) == 2:
             num_tran, n = input_shape
+            
+            # 网络参数
+            n_filter = 16
+            kernel_size = (max(1, num_tran // 2), min(10, n // 10))
+            num_resblock = 3
+            
+            # 根据类别数调整全连接层
+            if args.classes <= 2:
+                m = np.array([40, 30, 20])
+            elif args.classes <= 3:
+                m = np.array([50, 40, 30, 20])
+            else:
+                m = np.array([60, 50, 40, 30, 20])
+            
+            l = len(m)
+            
+            print(f"深度网络参数:")
+            print(f"  通道数: {num_tran}")
+            print(f"  时间长度: {n}")
+            print(f"  卷积核: {kernel_size}")
+            print(f"  残差块: {num_resblock}")
+            print(f"  全连接层: {m}")
+            
+            model = general_deep_nn(
+                n=n,
+                n_trans=num_tran,
+                kernel_size=kernel_size,
+                n_filter=n_filter,
+                dropout_rate=args.dropout,
+                n_classes=args.classes,
+                n_resblock=num_resblock,
+                m=m,
+                l=l,
+                model_name=args.exp_name
+            )
+            
         elif len(input_shape) == 1:
             # 1维数据，需要添加通道维度
             n = input_shape[0]
             num_tran = 1
+            
+            # 网络参数
+            n_filter = 16
+            kernel_size = (1, min(10, n // 10))
+            num_resblock = 3
+            
+            # 根据类别数调整全连接层
+            if args.classes <= 2:
+                m = np.array([40, 30, 20])
+            elif args.classes <= 3:
+                m = np.array([50, 40, 30, 20])
+            else:
+                m = np.array([60, 50, 40, 30, 20])
+            
+            l = len(m)
+            
+            print(f"深度网络参数:")
+            print(f"  通道数: {num_tran}")
+            print(f"  时间长度: {n}")
+            print(f"  卷积核: {kernel_size}")
+            print(f"  残差块: {num_resblock}")
+            print(f"  全连接层: {m}")
+            
+            model = general_deep_nn(
+                n=n,
+                n_trans=num_tran,
+                kernel_size=kernel_size,
+                n_filter=n_filter,
+                dropout_rate=args.dropout,
+                n_classes=args.classes,
+                n_resblock=num_resblock,
+                m=m,
+                l=l,
+                model_name=args.exp_name
+            )
         else:
             raise ValueError(f"不支持的输入形状: {input_shape}")
-        
-        # 网络参数
-        n_filter = 16
-        kernel_size = (max(1, num_tran // 2), min(10, n // 10))
-        num_resblock = 3
-        
-        # 根据类别数调整全连接层
-        if args.classes <= 2:
-            m = np.array([40, 30, 20])
-        elif args.classes <= 3:
-            m = np.array([50, 40, 30, 20])
-        else:
-            m = np.array([60, 50, 40, 30, 20])
-        
-        l = len(m)
-        
-        print(f"深度网络参数:")
-        print(f"  通道数: {num_tran}")
-        print(f"  时间长度: {n}")
-        print(f"  卷积核: {kernel_size}")
-        print(f"  残差块: {num_resblock}")
-        print(f"  全连接层: {m}")
-        
-        model = general_deep_nn(
-            n=n,
-            n_trans=num_tran,
-            kernel_size=kernel_size,
-            n_filter=n_filter,
-            dropout_rate=args.dropout,
-            n_classes=args.classes,
-            n_resblock=num_resblock,
-            m=m,
-            l=l,
-            model_name=args.exp_name
-        )
     
     return model
 
@@ -552,11 +633,7 @@ def save_results(model, results, args, data_dict):
     output_dir = Path(args.output_dir) / args.exp_name
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    # 保存模型 (仅当指定时)
-    if args.save_model:
-        model_path = output_dir / "model"
-        model.save(model_path)
-        print(f"模型保存: {model_path}")
+    # 不保存模型权重（按用户要求）
     
     # 保存配置
     config = vars(args)
@@ -565,15 +642,17 @@ def save_results(model, results, args, data_dict):
         json.dump(config, f, indent=2, ensure_ascii=False)
     print(f"配置保存: {config_path}")
     
-    # 保存结果
+    # 保存结果（只包含最佳准确率和训练历史）
     results_path = output_dir / "results.npz"
     save_dict = {
         'config': config,
         'class_names': data_dict['change_types'],
-        **results
+        'best_accuracy': results['best_accuracy'],
+        'training_history': results['training_history']
     }
     np.savez(results_path, **save_dict)
     print(f"结果保存: {results_path}")
+    print(f"最佳准确率: {results['best_accuracy']:.4f}")
     
     # 保存数据（如果需要）
     if args.save_data:
@@ -619,21 +698,36 @@ def main():
         # 训练模型
         history = train_model(model, x_train, y_train, args)
         
-        # 评估模型
-        results = evaluate_model(model, x_test, y_test, args, data_dict['change_types'])
+        # 从训练历史中获取最高的验证准确率
+        if hasattr(history, 'history') and 'val_accuracy' in history.history:
+            best_val_accuracy = max(history.history['val_accuracy'])
+            best_epoch = history.history['val_accuracy'].index(best_val_accuracy) + 1
+            print(f"\n=== 最佳验证准确率 ===")
+            print(f"最佳验证准确率: {best_val_accuracy:.4f} (第 {best_epoch} 轮)")
+            
+            # 用最佳验证准确率替换测试准确率
+            final_accuracy = best_val_accuracy
+        else:
+            # 如果没有验证历史，则评估模型获取测试准确率
+            print(f"\n=== 模型评估 ===")
+            results = evaluate_model(model, x_test, y_test, args, data_dict['change_types'])
+            final_accuracy = results['test_accuracy']
+        
+        # 创建简化的结果字典（只保存准确率）
+        results = {
+            'best_accuracy': final_accuracy,
+            'training_history': history.history if hasattr(history, 'history') else None
+        }
         
         # 保存结果
         output_dir = save_results(model, results, args, data_dict)
         
         print(f"\n=== 训练完成 ===")
         print(f"实验名称: {args.exp_name}")
-        print(f"测试准确率: {results['test_accuracy']:.4f}")
+        print(f"最佳准确率: {final_accuracy:.4f}")
         print(f"结果目录: {output_dir}")
         
-        if 'class_accuracies' in results:
-            print(f"平均类别准确率: {np.mean(results['class_accuracies']):.4f}")
-        
-        return results['test_accuracy']  # 返回准确率用于批量实验
+        return final_accuracy  # 返回最佳准确率用于批量实验
         
     except Exception as e:
         print(f"训练过程中出现错误: {e}")

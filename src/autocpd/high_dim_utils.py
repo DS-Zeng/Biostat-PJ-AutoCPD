@@ -18,7 +18,7 @@ def HighDimDataSetGen(
     correlation_changes: Optional[Dict] = None,
     trend_changes: Optional[Dict] = None,
     structural_changes: Optional[Dict] = None,
-    n_trim: int = 10,
+    n_trim: int = 0,
     noise_std: float = 1.0,
     correlation_base: float = 0.3,
     seed: Optional[int] = None
@@ -31,7 +31,7 @@ def HighDimDataSetGen(
     N_sub : int
         每类样本数量
     n : int  
-        时间序列长度
+        时间序列长度（最终输出长度）
     d : int
         数据维度 (默认1维，可扩展到高维)
     mean_changes : dict, optional
@@ -45,7 +45,7 @@ def HighDimDataSetGen(
     structural_changes : dict, optional
         结构变化参数 {'enabled': bool, 'type': str, 'magnitude': float}
     n_trim : int
-        边界修剪大小
+        边界修剪大小（已废弃，保留参数兼容性）
     noise_std : float
         噪声标准差
     correlation_base : float
@@ -61,6 +61,8 @@ def HighDimDataSetGen(
     
     if seed is not None:
         np.random.seed(seed)
+    
+    print(f"生成时间序列长度: {n}")
     
     # 默认参数设置
     default_mean = {'enabled': True, 'magnitude': 2.0, 'dimensions': 'all'}
@@ -101,7 +103,7 @@ def HighDimDataSetGen(
     
     # 类别 0: 无变点 (基线)
     print("生成类别 0: 无变点")
-    no_change_data = _generate_no_change_data(N_sub, n, d, noise_std, correlation_base, n_trim)
+    no_change_data = _generate_no_change_data(N_sub, n, d, noise_std, correlation_base)
     data_list.append(no_change_data)
     labels.extend([0] * N_sub)
     change_points.extend([None] * N_sub)
@@ -113,23 +115,23 @@ def HighDimDataSetGen(
         
         if change_type == 'mean':
             change_data = _generate_mean_change_data(
-                N_sub, n, d, mean_changes, noise_std, correlation_base, n_trim
+                N_sub, n, d, mean_changes, noise_std, correlation_base
             )
         elif change_type == 'variance':
             change_data = _generate_variance_change_data(
-                N_sub, n, d, var_changes, noise_std, correlation_base, n_trim
+                N_sub, n, d, var_changes, noise_std, correlation_base
             )
         elif change_type == 'correlation':
             change_data = _generate_correlation_change_data(
-                N_sub, n, d, correlation_changes, noise_std, correlation_base, n_trim
+                N_sub, n, d, correlation_changes, noise_std, correlation_base
             )
         elif change_type == 'trend':
             change_data = _generate_trend_change_data(
-                N_sub, n, d, trend_changes, noise_std, correlation_base, n_trim
+                N_sub, n, d, trend_changes, noise_std, correlation_base
             )
         elif change_type == 'structural':
             change_data = _generate_structural_change_data(
-                N_sub, n, d, structural_changes, noise_std, correlation_base, n_trim
+                N_sub, n, d, structural_changes, noise_std, correlation_base
             )
         
         data_list.append(change_data)
@@ -154,7 +156,7 @@ def HighDimDataSetGen(
 
 
 def _generate_no_change_data(N_sub: int, n: int, d: int, noise_std: float, 
-                           correlation_base: float, n_trim: int) -> np.ndarray:
+                           correlation_base: float) -> np.ndarray:
     """生成无变点的基线数据"""
     data = []
     
@@ -171,17 +173,13 @@ def _generate_no_change_data(N_sub: int, n: int, d: int, noise_std: float,
             # 生成多维时间序列
             ts = np.random.multivariate_normal(np.zeros(d), cov_matrix, n).T
         
-        # 修剪边界
-        if n_trim > 0:
-            ts = ts[..., n_trim:-n_trim]
-        
         data.append(ts)
     
     return np.array(data)
 
 
 def _generate_mean_change_data(N_sub: int, n: int, d: int, mean_changes: Dict,
-                             noise_std: float, correlation_base: float, n_trim: int) -> np.ndarray:
+                             noise_std: float, correlation_base: float) -> np.ndarray:
     """生成均值变化数据"""
     data = []
     magnitude = mean_changes['magnitude']
@@ -221,17 +219,13 @@ def _generate_mean_change_data(N_sub: int, n: int, d: int, mean_changes: Dict,
             ts2 = np.random.multivariate_normal(mean2, cov_matrix, n - change_point).T
             ts = np.concatenate([ts1, ts2], axis=-1)
         
-        # 修剪边界
-        if n_trim > 0:
-            ts = ts[..., n_trim:-n_trim]
-            
         data.append(ts)
     
     return np.array(data)
 
 
 def _generate_variance_change_data(N_sub: int, n: int, d: int, var_changes: Dict,
-                                 noise_std: float, correlation_base: float, n_trim: int) -> np.ndarray:
+                                 noise_std: float, correlation_base: float) -> np.ndarray:
     """生成方差变化数据"""
     data = []
     magnitude = var_changes['magnitude']
@@ -276,21 +270,17 @@ def _generate_variance_change_data(N_sub: int, n: int, d: int, var_changes: Dict
             ts2 = np.random.multivariate_normal(np.zeros(d), cov_matrix2, n - change_point).T
             ts = np.concatenate([ts1, ts2], axis=-1)
         
-        # 修剪边界
-        if n_trim > 0:
-            ts = ts[..., n_trim:-n_trim]
-            
         data.append(ts)
     
     return np.array(data)
 
 
 def _generate_correlation_change_data(N_sub: int, n: int, d: int, corr_changes: Dict,
-                                    noise_std: float, correlation_base: float, n_trim: int) -> np.ndarray:
+                                    noise_std: float, correlation_base: float) -> np.ndarray:
     """生成相关性变化数据 (仅适用于多维)"""
     if d == 1:
         warnings.warn("相关性变化需要多维数据 (d > 1)")
-        return _generate_no_change_data(N_sub, n, d, noise_std, correlation_base, n_trim)
+        return _generate_no_change_data(N_sub, n, d, noise_std, correlation_base)
     
     data = []
     magnitude = corr_changes['magnitude']
@@ -312,17 +302,13 @@ def _generate_correlation_change_data(N_sub: int, n: int, d: int, corr_changes: 
         
         ts = np.concatenate([ts1, ts2], axis=-1)
         
-        # 修剪边界
-        if n_trim > 0:
-            ts = ts[..., n_trim:-n_trim]
-            
         data.append(ts)
     
     return np.array(data)
 
 
 def _generate_trend_change_data(N_sub: int, n: int, d: int, trend_changes: Dict,
-                              noise_std: float, correlation_base: float, n_trim: int) -> np.ndarray:
+                              noise_std: float, correlation_base: float) -> np.ndarray:
     """生成趋势变化数据"""
     data = []
     magnitude = trend_changes['magnitude']
@@ -366,21 +352,17 @@ def _generate_trend_change_data(N_sub: int, n: int, d: int, trend_changes: Dict,
             
             ts = np.concatenate([ts1, ts2_base], axis=-1)
         
-        # 修剪边界
-        if n_trim > 0:
-            ts = ts[..., n_trim:-n_trim]
-            
         data.append(ts)
     
     return np.array(data)
 
 
 def _generate_structural_change_data(N_sub: int, n: int, d: int, struct_changes: Dict,
-                                   noise_std: float, correlation_base: float, n_trim: int) -> np.ndarray:
+                                   noise_std: float, correlation_base: float) -> np.ndarray:
     """生成结构变化数据 (仅适用于多维)"""
     if d == 1:
         warnings.warn("结构变化需要多维数据 (d > 1)")
-        return _generate_trend_change_data(N_sub, n, d, struct_changes, noise_std, correlation_base, n_trim)
+        return _generate_trend_change_data(N_sub, n, d, struct_changes, noise_std, correlation_base)
     
     data = []
     magnitude = struct_changes['magnitude']
@@ -412,15 +394,11 @@ def _generate_structural_change_data(N_sub: int, n: int, d: int, struct_changes:
             
         else:
             # 默认：简单的结构变化
-            ts1 = _generate_no_change_data(1, change_point, d, noise_std, correlation_base, 0)[0]
-            ts2 = _generate_no_change_data(1, n - change_point, d, noise_std * (1 + magnitude), correlation_base, 0)[0]
+            ts1 = _generate_no_change_data(1, change_point, d, noise_std, correlation_base)[0]
+            ts2 = _generate_no_change_data(1, n - change_point, d, noise_std * (1 + magnitude), correlation_base)[0]
         
         ts = np.concatenate([ts1, ts2], axis=-1)
         
-        # 修剪边界
-        if n_trim > 0:
-            ts = ts[..., n_trim:-n_trim]
-            
         data.append(ts)
     
     return np.array(data)
@@ -480,10 +458,10 @@ def get_preset_config(preset_name: str, d: int = 1) -> Dict:
     
     configs = {
         'basic': {
-            'mean_changes': {'enabled': True, 'magnitude': 2.0, 'dimensions': 'all'},
-            'var_changes': {'enabled': True, 'magnitude': 0.5, 'dimensions': 'all'},
-            'correlation_changes': {'enabled': False},
-            'trend_changes': {'enabled': False},
+            'mean_changes': {'enabled': True, 'magnitude': 1.5 if d <= 3 else 1.0, 'dimensions': 'all' if d <= 3 else [0, 1]},
+            'var_changes': {'enabled': True, 'magnitude': 0.4 if d <= 3 else 0.3, 'dimensions': 'all' if d <= 3 else [0, 2]},
+            'correlation_changes': {'enabled': d > 1, 'magnitude': 0.3},
+            'trend_changes': {'enabled': d > 1, 'magnitude': 0.015, 'dimensions': [0] if d > 1 else 'all'},
             'structural_changes': {'enabled': False}
         },
         
@@ -524,7 +502,7 @@ def prepare_high_dim_data_for_training(data_dict: Dict, transform_type: str = 'f
     data_dict : dict
         HighDimDataSetGen的输出
     transform_type : str
-        数据变换类型: 'flatten', 'channel', 'pca'
+        数据变换类型: 'flatten', 'channel', 'reshape_20x20'
         
     Returns:
     --------
@@ -550,16 +528,16 @@ def prepare_high_dim_data_for_training(data_dict: Dict, transform_type: str = 'f
         # 保持通道格式：(N, d, T) - 适合CNN
         pass
         
-    elif transform_type == 'pca':
-        # PCA降维 + 展平
+    elif transform_type == 'reshape_20x20':
+        # 专门为深度CNN重新整形：(N, d, T) -> (N, d, 20, 20)
         N, d, T = data_x.shape
-        data_reshaped = data_x.reshape(N, d * T)
         
-        from sklearn.decomposition import PCA
-        n_components = min(50, d * T // 2)  # 自适应组件数
-        pca = PCA(n_components=n_components)
-        data_x = pca.fit_transform(data_reshaped)
+        # 确保时间序列长度是400（20x20）
+        if T != 400:
+            raise ValueError(f"时间序列长度必须是400，当前是{T}")
         
-        print(f"PCA降维: {d*T} -> {data_x.shape[1]} (解释方差比: {pca.explained_variance_ratio_.sum():.3f})")
+        # 重新整形为20x20格式
+        data_x = data_x.reshape(N, d, 20, 20)
+        print(f"重新整形为深度网络格式: (N={N}, channels={d}, height=20, width=20)")
     
     return data_x, labels 

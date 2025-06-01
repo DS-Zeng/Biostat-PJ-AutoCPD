@@ -38,7 +38,7 @@ class BatchExperiment:
         
         # 基础参数
         self.base_args = base_args or {
-            'samples': 800,
+            'samples': 1500,
             'length': 300,
             'epochs': None,  # 自动确定
             'batch_size': 64,
@@ -61,7 +61,7 @@ class BatchExperiment:
         
         models = ['simple', 'deep', 'transformer']
         class_numbers = [3, 5]
-        dimensions = [1, 5, 10]
+        dimensions = [1, 5, 8]
         
         for model in models:
             for classes in class_numbers:
@@ -132,7 +132,7 @@ class BatchExperiment:
                 cmd, 
                 capture_output=True, 
                 text=True, 
-                timeout=3600  # 1小时超时
+                timeout=36000  # 10小时超时
             )
             
             duration = time.time() - start_time
@@ -167,7 +167,7 @@ class BatchExperiment:
             'dimension': config['dim'],
             'preset': config['preset'],
             'use_original': config['use_original'],
-            'accuracy': accuracy,
+            'best_accuracy': accuracy,  # 最佳验证准确率
             'duration_minutes': duration / 60,
             'status': status,
             'error_msg': error_msg,
@@ -178,7 +178,7 @@ class BatchExperiment:
         
         # 打印结果
         if accuracy is not None:
-            print(f"✓ 准确率: {accuracy:.4f}, 时间: {duration/60:.1f}分钟")
+            print(f"✓ 最佳准确率: {accuracy:.4f}, 时间: {duration/60:.1f}分钟")
         else:
             print(f"✗ 失败: {status}, 时间: {duration/60:.1f}分钟")
             if error_msg:
@@ -187,18 +187,44 @@ class BatchExperiment:
         return result_record
     
     def _extract_accuracy_from_output(self, output):
-        """从输出中提取准确率"""
+        """从输出中提取准确率（最佳验证准确率）"""
         lines = output.split('\n')
+        
+        # 首先尝试提取最佳准确率（新格式）
+        for line in lines:
+            if "最佳准确率:" in line:
+                try:
+                    # 提取类似 "最佳准确率: 0.8750" 的数字
+                    parts = line.split("最佳准确率:")
+                    if len(parts) > 1:
+                        accuracy_str = parts[1].strip()
+                        return float(accuracy_str)
+                except:
+                    continue
+        
+        # 备用：尝试提取最佳验证准确率（从详细输出中）
+        for line in lines:
+            if "最佳验证准确率:" in line:
+                try:
+                    # 提取类似 "最佳验证准确率: 0.8750 (第 5 轮)" 的数字
+                    parts = line.split("最佳验证准确率:")
+                    if len(parts) > 1:
+                        accuracy_part = parts[1].split("(")[0].strip()  # 去掉轮次信息
+                        return float(accuracy_part)
+                except:
+                    continue
+        
+        # 最后备用：提取测试准确率（旧格式兼容）
         for line in lines:
             if "测试准确率:" in line:
                 try:
-                    # 提取类似 "测试准确率: 0.8750" 的数字
                     parts = line.split("测试准确率:")
                     if len(parts) > 1:
                         accuracy_str = parts[1].strip()
                         return float(accuracy_str)
                 except:
                     continue
+        
         return None
     
     def run_all_experiments(self):
@@ -271,14 +297,14 @@ class BatchExperiment:
             successful_df = df[df['status'] == '成功'].copy()
             if len(successful_df) > 0:
                 f.write("准确率统计 (仅成功实验):\n")
-                f.write(f"平均准确率: {successful_df['accuracy'].mean():.4f}\n")
-                f.write(f"最高准确率: {successful_df['accuracy'].max():.4f}\n")
-                f.write(f"最低准确率: {successful_df['accuracy'].min():.4f}\n")
-                f.write(f"标准差: {successful_df['accuracy'].std():.4f}\n\n")
+                f.write(f"平均准确率: {successful_df['best_accuracy'].mean():.4f}\n")
+                f.write(f"最高准确率: {successful_df['best_accuracy'].max():.4f}\n")
+                f.write(f"最低准确率: {successful_df['best_accuracy'].min():.4f}\n")
+                f.write(f"标准差: {successful_df['best_accuracy'].std():.4f}\n\n")
                 
                 # 按模型分组
                 f.write("按模型分组的平均准确率:\n")
-                model_stats = successful_df.groupby('model')['accuracy'].agg(['mean', 'std', 'count'])
+                model_stats = successful_df.groupby('model')['best_accuracy'].agg(['mean', 'std', 'count'])
                 for model in model_stats.index:
                     stats = model_stats.loc[model]
                     f.write(f"  {model:12}: {stats['mean']:.4f} ± {stats['std']:.4f} (n={stats['count']})\n")
@@ -286,7 +312,7 @@ class BatchExperiment:
                 
                 # 按分类数分组
                 f.write("按分类数分组的平均准确率:\n")
-                class_stats = successful_df.groupby('classes')['accuracy'].agg(['mean', 'std', 'count'])
+                class_stats = successful_df.groupby('classes')['best_accuracy'].agg(['mean', 'std', 'count'])
                 for classes in class_stats.index:
                     stats = class_stats.loc[classes]
                     f.write(f"  {classes}分类: {stats['mean']:.4f} ± {stats['std']:.4f} (n={stats['count']})\n")
@@ -294,20 +320,20 @@ class BatchExperiment:
                 
                 # 按维度分组
                 f.write("按维度分组的平均准确率:\n")
-                dim_stats = successful_df.groupby('dimension')['accuracy'].agg(['mean', 'std', 'count'])
+                dim_stats = successful_df.groupby('dimension')['best_accuracy'].agg(['mean', 'std', 'count'])
                 for dim in dim_stats.index:
                     stats = dim_stats.loc[dim]
                     f.write(f"  {dim}维: {stats['mean']:.4f} ± {stats['std']:.4f} (n={stats['count']})\n")
                 f.write("\n")
                 
                 # 最佳实验
-                best_exp = successful_df.loc[successful_df['accuracy'].idxmax()]
+                best_exp = successful_df.loc[successful_df['best_accuracy'].idxmax()]
                 f.write("最佳实验:\n")
                 f.write(f"  实验ID: {best_exp['exp_id']}\n")
                 f.write(f"  模型: {best_exp['model']}\n")
                 f.write(f"  分类数: {best_exp['classes']}\n")
                 f.write(f"  维度: {best_exp['dimension']}\n")
-                f.write(f"  准确率: {best_exp['accuracy']:.4f}\n")
+                f.write(f"  准确率: {best_exp['best_accuracy']:.4f}\n")
                 f.write(f"  训练时间: {best_exp['duration_minutes']:.1f}分钟\n\n")
             
             # 失败实验
@@ -336,7 +362,7 @@ class BatchExperiment:
         
         # 1.1 按模型分组的准确率
         ax1 = axes[0, 0]
-        model_acc = successful_df.groupby('model')['accuracy'].mean().sort_values(ascending=True)
+        model_acc = successful_df.groupby('model')['best_accuracy'].mean().sort_values(ascending=True)
         model_acc.plot(kind='barh', ax=ax1, color=['skyblue', 'lightcoral', 'lightgreen'])
         ax1.set_title('各模型平均准确率', fontweight='bold')
         ax1.set_xlabel('准确率')
@@ -344,7 +370,7 @@ class BatchExperiment:
         
         # 1.2 按分类数分组的准确率
         ax2 = axes[0, 1]
-        sns.boxplot(data=successful_df, x='classes', y='accuracy', ax=ax2)
+        sns.boxplot(data=successful_df, x='classes', y='best_accuracy', ax=ax2)
         ax2.set_title('不同分类数的准确率分布', fontweight='bold')
         ax2.set_xlabel('分类数')
         ax2.set_ylabel('准确率')
@@ -352,7 +378,7 @@ class BatchExperiment:
         
         # 1.3 按维度分组的准确率
         ax3 = axes[1, 0]
-        sns.boxplot(data=successful_df, x='dimension', y='accuracy', ax=ax3)
+        sns.boxplot(data=successful_df, x='dimension', y='best_accuracy', ax=ax3)
         ax3.set_title('不同维度的准确率分布', fontweight='bold')
         ax3.set_xlabel('数据维度')
         ax3.set_ylabel('准确率')
@@ -363,7 +389,7 @@ class BatchExperiment:
         colors = {'simple': 'blue', 'deep': 'red', 'transformer': 'green'}
         for model in successful_df['model'].unique():
             model_data = successful_df[successful_df['model'] == model]
-            ax4.scatter(model_data['duration_minutes'], model_data['accuracy'], 
+            ax4.scatter(model_data['duration_minutes'], model_data['best_accuracy'], 
                        label=model, alpha=0.7, color=colors.get(model, 'gray'))
         ax4.set_title('训练时间 vs 准确率', fontweight='bold')
         ax4.set_xlabel('训练时间 (分钟)')
@@ -387,7 +413,7 @@ class BatchExperiment:
             if len(model_data) > 0:
                 # 创建透视表
                 pivot_table = model_data.pivot_table(
-                    values='accuracy', 
+                    values='best_accuracy', 
                     index='dimension', 
                     columns='classes',
                     aggfunc='mean'
@@ -415,10 +441,10 @@ class BatchExperiment:
                                     successful_df['dimension'].astype(str) + 'd')
         
         # 按准确率排序
-        sorted_df = successful_df.sort_values('accuracy', ascending=True)
+        sorted_df = successful_df.sort_values('best_accuracy', ascending=True)
         
         # 绘制条形图
-        bars = ax.barh(range(len(sorted_df)), sorted_df['accuracy'])
+        bars = ax.barh(range(len(sorted_df)), sorted_df['best_accuracy'])
         
         # 设置颜色
         for i, (_, row) in enumerate(sorted_df.iterrows()):
@@ -462,18 +488,18 @@ class BatchExperiment:
         
         # 总体统计
         print(f"成功实验数: {len(successful_df)}/{len(df)}")
-        print(f"平均准确率: {successful_df['accuracy'].mean():.4f}")
-        print(f"最高准确率: {successful_df['accuracy'].max():.4f}")
+        print(f"平均准确率: {successful_df['best_accuracy'].mean():.4f}")
+        print(f"最高准确率: {successful_df['best_accuracy'].max():.4f}")
         print(f"平均训练时间: {successful_df['duration_minutes'].mean():.1f}分钟")
         
         # 最佳实验
-        best_exp = successful_df.loc[successful_df['accuracy'].idxmax()]
+        best_exp = successful_df.loc[successful_df['best_accuracy'].idxmax()]
         print(f"\n🏆 最佳实验:")
-        print(f"   {best_exp['exp_id']} - 准确率: {best_exp['accuracy']:.4f}")
+        print(f"   {best_exp['exp_id']} - 准确率: {best_exp['best_accuracy']:.4f}")
         
         # 按模型排行
         print(f"\n📊 模型排行:")
-        model_ranking = successful_df.groupby('model')['accuracy'].mean().sort_values(ascending=False)
+        model_ranking = successful_df.groupby('model')['best_accuracy'].mean().sort_values(ascending=False)
         for i, (model, acc) in enumerate(model_ranking.items(), 1):
             print(f"   {i}. {model:12}: {acc:.4f}")
         
@@ -481,9 +507,9 @@ class BatchExperiment:
         print(f"\n🎯 各模型最佳配置:")
         for model in successful_df['model'].unique():
             model_data = successful_df[successful_df['model'] == model]
-            best_model_exp = model_data.loc[model_data['accuracy'].idxmax()]
+            best_model_exp = model_data.loc[model_data['best_accuracy'].idxmax()]
             print(f"   {model:12}: {best_model_exp['classes']}分类, "
-                  f"{best_model_exp['dimension']}维 - {best_model_exp['accuracy']:.4f}")
+                  f"{best_model_exp['dimension']}维 - {best_model_exp['best_accuracy']:.4f}")
         
         print(f"\n{'='*60}")
 

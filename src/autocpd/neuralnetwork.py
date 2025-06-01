@@ -3,7 +3,7 @@ from pathlib import Path
 
 import numpy as np
 import tensorflow as tf
-from keras import layers, losses, metrics, models
+from tensorflow.keras import layers, losses, metrics, models
 
 
 def general_simple_nn(n, l, m, num_classes, model_name="simple_nn"):
@@ -429,6 +429,84 @@ def general_deep_nn(
             x = resblock(x, kernel_size, filters=n_filter)
             x = resblock(x, kernel_size, filters=n_filter)
 
+    x = layers.GlobalAveragePooling2D()(x)
+    for i in range(l - 1):
+        x = layers.Dense(m[i], activation="relu", kernel_regularizer="l2")(x)
+        x = layers.Dropout(dropout_rate)(x)
+    x = layers.Dense(m[l - 1], activation="relu", kernel_regularizer="l2")(x)
+    output_layer = layers.Dense(n_classes)(x)
+    model = models.Model(input_layer, output_layer, name=model_name)
+    return model
+
+
+def general_deep_nn_4d(
+    channels,
+    height,
+    width,
+    kernel_size,
+    n_filter,
+    dropout_rate,
+    n_classes,
+    n_resblock,
+    m,
+    l,
+    model_name="deep_nn_4d",
+):
+    """
+    This function is used to construct the deep neural network for 4D input (channels, height, width).
+
+    Parameters
+    ----------
+    channels : int
+        the number of input channels (dimensions)
+    height : int
+        the height of input data
+    width : int
+        the width of input data
+    kernel_size : tuple
+        the kernel size
+    n_filter : int
+        the filter size
+    dropout_rate : float
+        the dropout rate
+    n_classes : int
+        the number of classes
+    n_resblock : int
+        the number of residual blocks
+    m : array
+        the width vector
+    l : int
+        the number of dense layers
+    model_name : str, optional
+        the model name, by default "deep_nn_4d"
+
+    Returns
+    -------
+    model
+        the model of deep neural network for 4D input
+    """
+    # Input layer for 4D data: (batch, channels, height, width)
+    input_layer = layers.Input(shape=(channels, height, width), name="Input")
+    
+    # First conv layer
+    x = layers.Conv2D(n_filter, kernel_size, padding="same")(input_layer)
+    x = layers.BatchNormalization()(x)
+    x = layers.ReLU()(x)
+    x = layers.MaxPooling2D((2, 2))(x)
+    
+    # Residual blocks
+    j1 = n_resblock % 4
+    for _ in range(j1):
+        x = resblock(x, kernel_size, filters=n_filter)
+    j2 = n_resblock // 4
+    if j2 > 0:
+        for _ in range(j2):
+            x = resblock(x, kernel_size, filters=n_filter, strides=(1, 2))
+            x = resblock(x, kernel_size, filters=n_filter)
+            x = resblock(x, kernel_size, filters=n_filter)
+            x = resblock(x, kernel_size, filters=n_filter)
+
+    # Global pooling and dense layers
     x = layers.GlobalAveragePooling2D()(x)
     for i in range(l - 1):
         x = layers.Dense(m[i], activation="relu", kernel_regularizer="l2")(x)

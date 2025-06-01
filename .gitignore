@@ -370,3 +370,6 @@ test/tensorboard_logs/
 
 
 batch_experiment_results/
+logs_multidim_deep/
+results/
+src/autocpd/__pycache__
