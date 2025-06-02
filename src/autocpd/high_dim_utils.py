@@ -7,6 +7,8 @@ Date: 2024-01-XX
 import numpy as np
 from typing import Dict, List, Tuple, Optional, Union
 import warnings
+from sklearn.decomposition import PCA
+
 
 
 def HighDimDataSetGen(
@@ -502,7 +504,7 @@ def prepare_high_dim_data_for_training(data_dict: Dict, transform_type: str = 'f
     data_dict : dict
         HighDimDataSetGen的输出
     transform_type : str
-        数据变换类型: 'flatten', 'channel', 'reshape_20x20'
+        数据变换类型: 'flatten', 'channel', 'reshape_20x20', 'multidim_6channel', 'pca'
         
     Returns:
     --------
@@ -528,6 +530,32 @@ def prepare_high_dim_data_for_training(data_dict: Dict, transform_type: str = 'f
         # 保持通道格式：(N, d, T) - 适合CNN
         pass
         
+    elif transform_type == 'pca':
+        # PCA降维：(N, d, T) -> (N, T*n_components) 通过对维度进行PCA降维
+        N, d, T = data_x.shape
+        
+        # 将数据重组为 (N*T, d) 进行PCA
+        data_reshaped = data_x.transpose(0, 2, 1).reshape(N * T, d)  # (N, d, T) -> (N*T, d)
+        
+        # 应用PCA降维
+        pca = PCA(n_components=3)
+        data_pca = pca.fit_transform(data_reshaped)  # (N*T, d) -> (N*T, n_components)
+        
+        # 重组回合适的格式
+        n_components = data_pca.shape[1]
+        if n_components == 1:
+            # 如果降到1维，输出 (N, T)
+            data_x = data_pca.reshape(N, T)
+            print(f"PCA降维完成: (N={N}, d={d}, T={T}) -> (N={N}, T={T})")
+        else:
+            # 如果保留多维，输出 (N, T*n_components) 用于flatten
+            data_x = data_pca.reshape(N, T * n_components)
+            print(f"PCA降维完成: (N={N}, d={d}, T={T}) -> (N={N}, T={T * n_components})")
+        
+        print(f"PCA参数: n_components={n_components}")
+        print(f"PCA解释方差比: {pca.explained_variance_ratio_}")
+        print(f"PCA累计解释方差比: {pca.explained_variance_ratio_.sum():.4f}")
+        
     elif transform_type == 'reshape_20x20':
         # 专门为深度CNN重新整形：(N, d, T) -> (N, d, 20, 20)
         N, d, T = data_x.shape
@@ -539,5 +567,39 @@ def prepare_high_dim_data_for_training(data_dict: Dict, transform_type: str = 'f
         # 重新整形为20x20格式
         data_x = data_x.reshape(N, d, 20, 20)
         print(f"重新整形为深度网络格式: (N={N}, channels={d}, height=20, width=20)")
+    
+    elif transform_type == 'multidim_6channel':
+        # 新的多维6通道格式：(N, d, T) -> (N, 6, T, d)
+        # 前3个通道：原始数据重复3遍
+        # 后3个通道：平方数据重复3遍
+        N, d, T = data_x.shape
+        
+        # 生成6种变换
+        result = np.zeros((N, 6, T, d))
+        
+        # 变换1-3: 原始数据（重复3遍）
+        original_data_transposed = data_x.transpose(0, 2, 1)  # (N, d, T) -> (N, T, d)
+        result[:, 0, :, :] = original_data_transposed
+        result[:, 1, :, :] = original_data_transposed
+        result[:, 2, :, :] = original_data_transposed
+        
+        # # 变换4-6: 平方数据（重复3遍）
+        # squared_data_transposed = np.square(data_x).transpose(0, 2, 1)  # (N, d, T) -> (N, T, d)
+        # result[:, 3, :, :] = squared_data_transposed
+        # result[:, 4, :, :] = squared_data_transposed
+        # result[:, 5, :, :] = squared_data_transposed
+ 
+        ############################################################33
+        result[:, 3, :, :] = original_data_transposed
+        result[:, 4, :, :] = original_data_transposed
+        result[:, 5, :, :] = original_data_transposed
+        
+        data_x = result
+        print(f"重新整形为多维6通道格式: (N={N}, channels=6, length={T}, dim={d})")
+        print(f"  通道0-2: 原始数据重复3遍")
+        print(f"  通道3-5: 平方数据重复3遍")
+    
+    else:
+        raise ValueError(f"不支持的变换类型: {transform_type}")
     
     return data_x, labels 

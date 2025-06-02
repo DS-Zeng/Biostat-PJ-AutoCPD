@@ -43,7 +43,7 @@ class BatchExperiment:
             'epochs': None,  # 自动确定
             'batch_size': 64,
             'seed': 2022,
-            'verbose': 0,  # 减少输出
+            'verbose': 1,  # 减少输出
             'validation_split': 0.2,
             'preset': 'basic',
             'gpu': 'auto'
@@ -59,7 +59,8 @@ class BatchExperiment:
         """生成所有实验配置"""
         configs = []
         
-        models = ['simple', 'deep', 'transformer']
+        # models = ['simple', 'deep', 'transformer']  # 启用所有三种模型
+        models = ['deep']  
         class_numbers = [3, 5]
         dimensions = [1, 5, 8]
         
@@ -103,8 +104,17 @@ class BatchExperiment:
             "--classes", str(config['classes']),
             "--dim", str(config['dim']),
             "--preset", config['preset'],
-            "--output_dir", str(self.output_dir / "individual_results")
+            "--output_dir", str(self.output_dir / "individual_results"),
+            "--deep_input_format", "multidim_6channel"
         ]
+        
+        # 根据模型类型添加特定参数
+        if config['model'] == 'deep':
+            # 深度模型使用6通道格式
+            cmd.extend(["--deep_input_format", "multidim_6channel"])
+        elif config['model'] == 'transformer':
+            # Transformer强制使用flatten而不是PCA
+            cmd.extend(["--transform", "flatten"])
         
         # 添加base_args
         for key, value in self.base_args.items():
@@ -521,22 +531,23 @@ def main():
     
     # 创建批量实验对象
     batch_exp = BatchExperiment(
-        output_dir="batch_experiment_results",
+        output_dir="batch_experiment_results_no_square_deep", #####################
         base_args={
-            'samples': 1500,  # 减少样本数以加快实验
-            'length': 400,   # 减少序列长度
-            'batch_size': 64,
+            'samples': 1500,  # 样本数量
+            'length': 400,   # 时间序列长度
+            'batch_size': 32,
             'seed': 2022,
             'verbose': 0,    # 减少输出
             'validation_split': 0.2,
-            'gpu': 'auto'
+            'gpu': '0'
         }
     )
     
     print(f"\n实验配置:")
-    print(f"- 模型: simple, deep, transformer")
+    print(f"- 模型: simple, deep (6通道), transformer (flatten)")
     print(f"- 分类数: 3, 5") 
-    print(f"- 维度: 1, 5, 10")
+    print(f"- 维度: 1, 5, 8")
+    print(f"- 样本数: 200, 序列长度: 200")
     print(f"- 总实验数: {len(batch_exp.experiment_configs)}")
     
     # 询问用户是否继续

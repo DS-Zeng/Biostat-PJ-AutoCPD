@@ -369,7 +369,14 @@ test/tensorboard_logs/
 !test/figs/*.png
 
 
-batch_experiment_results/
+batch_experiment_results*/
+transformer_hyperparameter_results/
+yahoo_results_comparison/
+data/
 logs_multidim_deep/
 results/
 src/autocpd/__pycache__
+
+train_yahoo_dataset.py
+transformer_hyperparameter_search.py
+batch_experiment_tran.py

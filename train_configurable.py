@@ -9,6 +9,11 @@ Usage:
     python train_configurable.py --model deep --classes 5 --dim 10 --samples 1000
     python train_configurable.py --model simple --classes 3 --dim 1 --preset basic
     python train_configurable.py --model transformer --classes 3 --dim 5 --samples 800
+    python train_configurable.py --model deep --classes 3 --dim 5 --deep_input_format multidim_6channel
+    python train_configurable.py --model deep --classes 3 --dim 8 --deep_input_format reshape_20x20
+    python train_configurable.py --model deep --dim 5 --preset full --samples 800
+    python train_configurable.py --model simple --classes 4 --dim 3 \\
+                               --length 200 --samples 500 --epochs 100 --batch_size 8
 """
 
 import argparse
@@ -49,12 +54,18 @@ def parse_arguments():
   # Transformer网络，3分类，5维数据
   python train_configurable.py --model transformer --classes 3 --dim 5 --samples 800
   
+  # 深度网络使用新的多维6通道格式
+  python train_configurable.py --model deep --classes 3 --dim 5 --deep_input_format multidim_6channel
+  
+  # 深度网络使用传统的20x20格式
+  python train_configurable.py --model deep --classes 3 --dim 8 --deep_input_format reshape_20x20
+  
   # 使用预设配置
   python train_configurable.py --model deep --dim 5 --preset full --samples 800
   
   # 自定义参数
   python train_configurable.py --model simple --classes 4 --dim 3 \\
-                               --length 200 --samples 500 --epochs 100
+                               --length 200 --samples 500 --epochs 100 --batch_size 8
         """
     )
     
@@ -96,10 +107,27 @@ def parse_arguments():
     parser.add_argument('--dropout', type=float, default=None,
                        help='Dropout率 (默认自动确定)')
     
+    # === Transformer特定参数 ===
+    parser.add_argument('--d_model', type=int, default=None,
+                       help='Transformer模型维度 (默认自动确定)')
+    
+    parser.add_argument('--num_heads', type=int, default=None,
+                       help='Transformer注意力头数 (默认自动确定)')
+    
+    parser.add_argument('--ff_dim', type=int, default=None,
+                       help='Transformer前馈网络维度 (默认自动确定)')
+    
+    parser.add_argument('--num_layers', type=int, default=None,
+                       help='Transformer层数 (默认自动确定)')
+    
     # === 数据处理 ===
     parser.add_argument('--transform', type=str, default='auto',
                        choices=['auto', 'flatten', 'channel', 'pca'],
                        help='高维数据变换方式 (默认: auto)')
+    
+    parser.add_argument('--deep_input_format', type=str, default='reshape_20x20',
+                       choices=['reshape_20x20', 'multidim_6channel'],
+                       help='深度网络输入格式: reshape_20x20=(batch_size,dim,20,20), multidim_6channel=(batch_size,6,len,dim) (默认: reshape_20x20)')
     
     parser.add_argument('--validation_split', type=float, default=0.2,
                        help='验证集比例 (默认: 0.2)')
@@ -247,16 +275,22 @@ def prepare_data_for_model(data_dict, args):
     # 确定变换方式
     if args.transform == 'auto':
         if args.model in ['simple', 'transformer']:
-            transform_type = 'flatten'
+            transform_type = 'flatten'  # Simple和Transformer都使用flatten
         elif args.model == 'deep':
             if args.dim == 1:
                 transform_type = 'channel'  # 1维保持原格式
             else:
-                transform_type = 'reshape_20x20'  # 高维使用20x20格式
+                # 根据deep_input_format参数决定变换方式
+                if args.deep_input_format == 'multidim_6channel':
+                    transform_type = 'multidim_6channel'  # 新的6通道格式
+                else:
+                    transform_type = 'reshape_20x20'  # 默认20x20格式
         else:
             transform_type = 'channel'  # 默认保持通道格式
     else:
+        # 用户明确指定了变换方式，直接使用
         transform_type = args.transform
+        print(f"使用用户指定的变换方式: {transform_type}")
     
     print(f"数据变换方式: {transform_type}")
     
@@ -373,22 +407,47 @@ def build_model(args, input_shape):
         else:
             n = input_shape[-1]  # 假设最后一维是时间
         
-        # 根据数据维度和类别数调整Transformer参数
-        if args.dim <= 3:
-            d_model = 64
-            num_heads = 4
-            ff_dim = 128
-        elif args.dim <= 8:
-            d_model = 128
-            num_heads = 8
-            ff_dim = 256
+        # 使用命令行参数或自动确定Transformer参数
+        if args.d_model is not None:
+            d_model = args.d_model
         else:
-            d_model = 256
-            num_heads = 8
-            ff_dim = 512
+            d_model = 128
+            
+        if args.num_heads is not None:
+            num_heads = args.num_heads
+        else:
+            num_heads = 4
+            
+        if args.ff_dim is not None:
+            ff_dim = args.ff_dim
+        else:
+            ff_dim = 128
+            
+        # 针对长序列优化参数 - 减少复杂度以节省显存
+        # if n > 1000:  # 对于长序列（如flatten后的高维数据）
+        #     print(f"检测到长序列 (n={n})，优化Transformer参数以节省显存...")
+        #     d_model = min(d_model, 64)  # 限制模型维度
+        #     num_heads = min(num_heads, 4)  # 限制注意力头数
+        #     ff_dim = min(ff_dim, 128)  # 限制前馈网络维度
+        #     print(f"  优化后 - d_model: {d_model}, num_heads: {num_heads}, ff_dim: {ff_dim}")
+            
+        if args.num_layers is not None:
+            num_layers = args.num_layers
+        else:
+            # 根据类别数调整层数
+            num_layers = 1 if args.classes <= 3 else 2
         
-        # 根据类别数调整层数
-        num_layers = 1 if args.classes <= 3 else 2
+        # 约束检查：确保num_heads能够整除d_model
+        if d_model % num_heads != 0:
+            print(f"警告: d_model ({d_model}) 不能被 num_heads ({num_heads}) 整除")
+            # 调整num_heads为d_model的最大因子
+            valid_heads = [h for h in [2, 4, 8, 16] if d_model % h == 0 and h <= d_model]
+            if valid_heads:
+                num_heads = max(valid_heads)
+                print(f"自动调整 num_heads 为: {num_heads}")
+            else:
+                num_heads = 2
+                print(f"使用默认 num_heads: {num_heads}")
         
         print(f"Transformer参数:")
         print(f"  序列长度: {n}")
@@ -411,49 +470,96 @@ def build_model(args, input_shape):
     else:  # deep
         # 深度神经网络
         if len(input_shape) == 3:
-            # 新的3维格式：(channels, height, width) - 不包含batch维度
+            # 3维格式：(channels, height, width) - 不包含batch维度
             channels, height, width = input_shape
             print(f"深度网络参数:")
+            print(f"  输入格式: 3维")
             print(f"  通道数: {channels}")
             print(f"  高度: {height}")
             print(f"  宽度: {width}")
             
-            # 根据新格式创建特殊的深度网络
-            from autocpd.neuralnetwork import general_deep_nn_4d
-            
-            # 网络参数
-            n_filter = 16
-            kernel_size = (3, 3)  # 固定使用3x3卷积核
-            num_resblock = 3
-            
-            # 根据类别数调整全连接层
-            if args.classes <= 2:
-                m = np.array([40, 30, 20])
-            elif args.classes <= 3:
-                m = np.array([50, 40, 30, 20])
+            # 根据输入格式决定使用哪种网络架构
+            if args.deep_input_format == 'multidim_6channel' and channels == 6:
+                # 新的(6, len, dim)格式 - 使用特殊的多维深度网络
+                print(f"  使用格式: (batch_size, 6, {height}, {width})")
+                
+                # 可以在这里调用专门处理(6,len,dim)格式的网络
+                # 暂时使用现有的general_deep_nn_4d，但调整参数
+                from autocpd.neuralnetwork import general_deep_nn_4d
+                
+                # 针对(6,len,dim)格式优化的网络参数
+                n_filter = 16 if width <= 5 else 24  # 根据dim调整
+                kernel_size = (3, 3)  # 对于时间序列数据使用较小的卷积核
+                num_resblock = 3 if args.classes <= 3 else 4
+                
+                # 根据类别数调整全连接层
+                if args.classes <= 2:
+                    m = np.array([40, 30, 20])
+                elif args.classes <= 3:
+                    m = np.array([50, 40, 30, 20])
+                else:
+                    m = np.array([60, 50, 40, 30, 20])
+                
+                l = len(m)
+                
+                print(f"  卷积核: {kernel_size}")
+                print(f"  残差块: {num_resblock}")
+                print(f"  全连接层: {m}")
+                
+                model = general_deep_nn_4d(
+                    channels=channels,
+                    height=height,
+                    width=width,
+                    kernel_size=kernel_size,
+                    n_filter=n_filter,
+                    dropout_rate=args.dropout,
+                    n_classes=args.classes,
+                    n_resblock=num_resblock,
+                    m=m,
+                    l=l,
+                    model_name=args.exp_name
+                )
+                
             else:
-                m = np.array([60, 50, 40, 30, 20])
-            
-            l = len(m)
-            
-            print(f"  卷积核: {kernel_size}")
-            print(f"  残差块: {num_resblock}")
-            print(f"  全连接层: {m}")
-            
-            model = general_deep_nn_4d(
-                channels=channels,
-                height=height,
-                width=width,
-                kernel_size=kernel_size,
-                n_filter=n_filter,
-                dropout_rate=args.dropout,
-                n_classes=args.classes,
-                n_resblock=num_resblock,
-                m=m,
-                l=l,
-                model_name=args.exp_name
-            )
-            
+                # 原来的(dim, 20, 20)格式
+                print(f"  使用格式: (batch_size, {channels}, 20, 20)")
+                
+                # 根据新格式创建特殊的深度网络
+                from autocpd.neuralnetwork import general_deep_nn_4d
+                
+                # 网络参数
+                n_filter = 16
+                kernel_size = (3, 3)  # 固定使用3x3卷积核
+                num_resblock = 3
+                
+                # 根据类别数调整全连接层
+                if args.classes <= 2:
+                    m = np.array([40, 30, 20])
+                elif args.classes <= 3:
+                    m = np.array([50, 40, 30, 20])
+                else:
+                    m = np.array([60, 50, 40, 30, 20])
+                
+                l = len(m)
+                
+                print(f"  卷积核: {kernel_size}")
+                print(f"  残差块: {num_resblock}")
+                print(f"  全连接层: {m}")
+                
+                model = general_deep_nn_4d(
+                    channels=channels,
+                    height=height,
+                    width=width,
+                    kernel_size=kernel_size,
+                    n_filter=n_filter,
+                    dropout_rate=args.dropout,
+                    n_classes=args.classes,
+                    n_resblock=num_resblock,
+                    m=m,
+                    l=l,
+                    model_name=args.exp_name
+                )
+                
         elif len(input_shape) == 2:
             num_tran, n = input_shape
             
