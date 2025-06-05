@@ -125,6 +125,96 @@ def general_transformer_nn(
     return models.Model(inputs=inputs, outputs=outputs, name=model_name)
 
 
+def general_transformer_nn_v2(
+    time_steps, 
+    input_dim,
+    d_model=128, 
+    num_heads=4, 
+    ff_dim=256, 
+    num_layers=1,
+    num_classes=2, 
+    dropout_rate=0.1,
+    model_name="transformer_nn_v2"
+):
+    """
+    构建改进的Transformer神经网络，直接接收(batch, time_steps, features)格式的输入
+    更符合Transformer原始设计理念：时间步作为序列长度，特征维度作为嵌入维度
+
+    Parameters
+    ----------
+    time_steps : int
+        时间步数（序列长度）
+    input_dim : int
+        每个时间步的特征维度
+    d_model : int, optional
+        Transformer模型维度, by default 128
+    num_heads : int, optional
+        注意力头数, by default 4
+    ff_dim : int, optional
+        前馈网络维度, by default 256
+    num_layers : int, optional
+        Transformer层数, by default 1
+    num_classes : int
+        分类数量
+    dropout_rate : float, optional
+        Dropout率, by default 0.1
+    model_name : str, optional
+        模型名称, by default "transformer_nn_v2"
+
+    Returns
+    -------
+    model
+        改进的Transformer神经网络模型
+    """
+    # 输入层：(batch, time_steps, input_dim)
+    inputs = tf.keras.Input(shape=(time_steps, input_dim), name="Input")
+    
+    # 如果输入特征维度与模型维度不同，需要线性投影
+    if input_dim != d_model:
+        x = layers.Dense(d_model, name="input_projection")(inputs)
+    else:
+        x = inputs
+    
+    # 添加位置编码
+    pos_emb = layers.Embedding(input_dim=time_steps, output_dim=d_model, name="positional_embedding")
+    positions = tf.range(start=0, limit=time_steps, delta=1)
+    x += pos_emb(positions)
+    
+    # Transformer编码器层
+    for i in range(num_layers):
+        # 多头自注意力
+        attn_output = layers.MultiHeadAttention(
+            num_heads=num_heads, 
+            key_dim=d_model // num_heads,  # 每个头的维度
+            dropout=dropout_rate,
+            name=f"multihead_attention_{i}"
+        )(x, x)
+        
+        # 残差连接和层归一化
+        x = layers.Add(name=f"add_attention_{i}")([x, attn_output])
+        x = layers.LayerNormalization(name=f"layer_norm_attention_{i}")(x)
+        
+        # 前馈网络
+        ffn = layers.Dense(ff_dim, activation="relu", name=f"ffn_dense1_{i}")(x)
+        ffn = layers.Dropout(dropout_rate, name=f"ffn_dropout_{i}")(ffn)
+        ffn = layers.Dense(d_model, name=f"ffn_dense2_{i}")(ffn)
+        
+        # 残差连接和层归一化
+        x = layers.Add(name=f"add_ffn_{i}")([x, ffn])
+        x = layers.LayerNormalization(name=f"layer_norm_ffn_{i}")(x)
+    
+    # 全局平均池化，将序列维度压缩为单一向量
+    x = layers.GlobalAveragePooling1D(name="global_avg_pooling")(x)
+    
+    # 分类前的Dropout
+    x = layers.Dropout(dropout_rate, name="final_dropout")(x)
+    
+    # 输出层
+    outputs = layers.Dense(num_classes, name="classification_head")(x)
+    
+    return models.Model(inputs=inputs, outputs=outputs, name=model_name)
+
+
 # mymodel = simple_nn(n=100, l=1, m=10, num_classes=2)
 # mymodel = simple_nn(n=100, l=3, m=10, num_classes=2)
 # mymodel = simple_nn(n=100, l=3, m=[20, 20, 5], num_classes=2)

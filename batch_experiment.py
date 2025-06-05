@@ -39,7 +39,7 @@ class BatchExperiment:
         # 基础参数
         self.base_args = base_args or {
             'samples': 1500,
-            'length': 300,
+            'length': 400,
             'epochs': None,  # 自动确定
             'batch_size': 64,
             'seed': 2022,
@@ -60,7 +60,7 @@ class BatchExperiment:
         configs = []
         
         # models = ['simple', 'deep', 'transformer']  # 启用所有三种模型
-        models = ['deep']  
+        models = ['transformer']
         class_numbers = [3, 5]
         dimensions = [1, 5, 8]
         
@@ -104,17 +104,21 @@ class BatchExperiment:
             "--classes", str(config['classes']),
             "--dim", str(config['dim']),
             "--preset", config['preset'],
-            "--output_dir", str(self.output_dir / "individual_results"),
-            "--deep_input_format", "multidim_6channel"
+            "--output_dir", str(self.output_dir / "individual_results")
         ]
         
         # 根据模型类型添加特定参数
-        if config['model'] == 'deep':
+        if config['model'] == 'simple':
+            # Simple模型使用flatten
+            cmd.extend(["--transform", "flatten"])
+        elif config['model'] == 'deep':
             # 深度模型使用6通道格式
             cmd.extend(["--deep_input_format", "multidim_6channel"])
+            cmd.extend(["--transform", "multidim_6channel"])
         elif config['model'] == 'transformer':
-            # Transformer强制使用flatten而不是PCA
-            cmd.extend(["--transform", "flatten"])
+            # 新的Transformer使用transpose格式（对所有维度都适用）
+            cmd.extend(["--transform", "transpose"])
+            print(f"  → 使用新的Transformer架构 (transpose格式)")
         
         # 添加base_args
         for key, value in self.base_args.items():
@@ -531,7 +535,7 @@ def main():
     
     # 创建批量实验对象
     batch_exp = BatchExperiment(
-        output_dir="batch_experiment_results_no_square_deep", #####################
+        output_dir="batch_experiment_results_transformer", #####################
         base_args={
             'samples': 1500,  # 样本数量
             'length': 400,   # 时间序列长度
@@ -544,7 +548,7 @@ def main():
     )
     
     print(f"\n实验配置:")
-    print(f"- 模型: simple, deep (6通道), transformer (flatten)")
+    print(f"- 模型: simple, deep (6通道), transformer (transpose)")
     print(f"- 分类数: 3, 5") 
     print(f"- 维度: 1, 5, 8")
     print(f"- 样本数: 200, 序列长度: 200")

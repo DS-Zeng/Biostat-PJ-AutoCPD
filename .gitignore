@@ -380,3 +380,5 @@ src/autocpd/__pycache__
 train_yahoo_dataset.py
 transformer_hyperparameter_search.py
 batch_experiment_tran.py
+
+log_dir/

@@ -33,7 +33,7 @@ warnings.filterwarnings('ignore')
 # 添加AutoCPD到路径
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
-from autocpd.neuralnetwork import compile_and_fit, general_simple_nn, general_deep_nn, general_transformer_nn
+from autocpd.neuralnetwork import compile_and_fit, general_simple_nn, general_deep_nn, general_transformer_nn, general_transformer_nn_v2
 from autocpd.utils import DataSetGen, Transform2D2TR
 from autocpd.high_dim_utils import HighDimDataSetGen, get_preset_config, prepare_high_dim_data_for_training
 
@@ -120,9 +120,23 @@ def parse_arguments():
     parser.add_argument('--num_layers', type=int, default=None,
                        help='Transformer层数 (默认自动确定)')
     
+    # === 噪声配置 ===
+    parser.add_argument('--noise_type', type=str, default='gaussian',
+                       choices=['gaussian', 'ar1', 'cauchy', 'ar_random'],
+                       help='噪声类型: gaussian=高斯白噪声, ar1=AR(1)噪声, cauchy=柯西噪声, ar_random=随机AR系数 (默认: gaussian)')
+    
+    parser.add_argument('--noise_level', type=float, default=1.0,
+                       help='噪声强度/标准差 (默认: 1.0)')
+    
+    parser.add_argument('--ar_coef', type=float, default=0.7,
+                       help='AR(1)噪声的自回归系数 (默认: 0.7)')
+    
+    parser.add_argument('--cauchy_scale', type=float, default=0.3,
+                       help='柯西噪声的尺度参数 (默认: 0.3)')
+    
     # === 数据处理 ===
     parser.add_argument('--transform', type=str, default='auto',
-                       choices=['auto', 'flatten', 'channel', 'pca'],
+                       choices=['auto', 'flatten', 'channel', 'pca', 'transpose'],
                        help='高维数据变换方式 (默认: auto)')
     
     parser.add_argument('--deep_input_format', type=str, default='reshape_20x20',
@@ -231,12 +245,23 @@ def generate_data(args):
         # 使用高维数据生成
         config = get_preset_config(args.preset, args.dim)
         
+        # 添加噪声参数
+        noise_params = {
+            'noise_std': args.noise_level,
+            'noise_type': args.noise_type,
+            'ar_coef': args.ar_coef,
+            'cauchy_scale': args.cauchy_scale
+        }
+        
+        print(f"噪声配置: {noise_params}")
+        
         data_dict = HighDimDataSetGen(
             N_sub=args.samples,
             n=args.length,
             d=args.dim,
             seed=args.seed,
-            **config
+            **config,
+            **noise_params
         )
         
         if args.classes is not None:
@@ -274,8 +299,10 @@ def prepare_data_for_model(data_dict, args):
     
     # 确定变换方式
     if args.transform == 'auto':
-        if args.model in ['simple', 'transformer']:
-            transform_type = 'flatten'  # Simple和Transformer都使用flatten
+        if args.model == 'simple':
+            transform_type = 'flatten'  # Simple NN使用flatten
+        elif args.model == 'transformer':
+            transform_type = 'transpose'  # Transformer使用transpose格式 (T, d)
         elif args.model == 'deep':
             if args.dim == 1:
                 transform_type = 'channel'  # 1维保持原格式
@@ -299,8 +326,16 @@ def prepare_data_for_model(data_dict, args):
         if args.model == 'deep':
             # 深度网络已经变换过了
             processed_data = data_x
+        elif args.model == 'transformer':
+            # Transformer需要 (N, T) 格式 - 对于1维数据，就是时间序列本身
+            if len(data_x.shape) == 3:
+                processed_data = data_x.squeeze(1)  # (N, 1, T) -> (N, T)
+            else:
+                processed_data = data_x
+            # 为Transformer添加特征维度：(N, T) -> (N, T, 1)
+            processed_data = processed_data.reshape(processed_data.shape[0], processed_data.shape[1], 1)
         else:
-            # 简单网络和Transformer需要展平
+            # 简单网络需要展平
             if len(data_x.shape) == 3:
                 processed_data = data_x.squeeze(1)  # (N, 1, T) -> (N, T)
             else:
@@ -402,16 +437,34 @@ def build_model(args, input_shape):
     
     elif args.model == 'transformer':
         # Transformer神经网络
-        if len(input_shape) == 1:
-            n = input_shape[0]
+        if len(input_shape) == 3:
+            # 原始数据是(N, T, d)格式，input_shape是(T, d)
+            time_steps, features = input_shape
+            n = time_steps
+            input_dim = features
+        elif len(input_shape) == 2:
+            # 新格式：(time_steps, features)
+            time_steps, features = input_shape
+            n = time_steps  # 序列长度是时间步数
+            input_dim = features  # 每个时间步的特征维度
+        elif len(input_shape) == 1:
+            # 1维数据格式: (T,) - 需要转换为(T, 1)
+            n = input_shape[0]  # 时间步数
+            input_dim = 1  # 特征维度
         else:
-            n = input_shape[-1]  # 假设最后一维是时间
+            raise ValueError(f"Transformer不支持的输入形状: {input_shape}")
         
         # 使用命令行参数或自动确定Transformer参数
         if args.d_model is not None:
             d_model = args.d_model
         else:
-            d_model = 128
+            # 根据输入特征维度动态调整d_model
+            if input_dim == 1:
+                d_model = 64  # 1维数据使用较小的模型
+            elif input_dim <= 5:
+                d_model = 128  # 低维数据
+            else:
+                d_model = 256  # 高维数据
             
         if args.num_heads is not None:
             num_heads = args.num_heads
@@ -421,15 +474,15 @@ def build_model(args, input_shape):
         if args.ff_dim is not None:
             ff_dim = args.ff_dim
         else:
-            ff_dim = 128
+            ff_dim = max(128, d_model * 2)  # 前馈网络维度通常是d_model的2倍
             
-        # 针对长序列优化参数 - 减少复杂度以节省显存
-        # if n > 1000:  # 对于长序列（如flatten后的高维数据）
-        #     print(f"检测到长序列 (n={n})，优化Transformer参数以节省显存...")
-        #     d_model = min(d_model, 64)  # 限制模型维度
-        #     num_heads = min(num_heads, 4)  # 限制注意力头数
-        #     ff_dim = min(ff_dim, 128)  # 限制前馈网络维度
-        #     print(f"  优化后 - d_model: {d_model}, num_heads: {num_heads}, ff_dim: {ff_dim}")
+        # 针对长序列优化参数 - 现在序列长度大大减少了
+        if n > 500:  # 只有当时间步数超过500时才需要优化
+            print(f"检测到长时间序列 (n={n})，优化Transformer参数以节省显存...")
+            d_model = min(d_model, 128)  # 限制模型维度
+            num_heads = min(num_heads, 4)  # 限制注意力头数
+            ff_dim = min(ff_dim, 256)  # 限制前馈网络维度
+            print(f"  优化后 - d_model: {d_model}, num_heads: {num_heads}, ff_dim: {ff_dim}")
             
         if args.num_layers is not None:
             num_layers = args.num_layers
@@ -450,14 +503,17 @@ def build_model(args, input_shape):
                 print(f"使用默认 num_heads: {num_heads}")
         
         print(f"Transformer参数:")
-        print(f"  序列长度: {n}")
+        print(f"  时间步数: {n}")
+        print(f"  特征维度: {input_dim}")
         print(f"  模型维度: {d_model}")
         print(f"  注意力头数: {num_heads}")
         print(f"  前馈维度: {ff_dim}")
         print(f"  层数: {num_layers}")
         
-        model = general_transformer_nn(
-            n=n,
+        # 使用改进的Transformer构建函数
+        model = general_transformer_nn_v2(
+            time_steps=n,
+            input_dim=input_dim,
             d_model=d_model,
             num_heads=num_heads,
             ff_dim=ff_dim,
